@@ -32,7 +32,7 @@ All other extensions are **available** but not installed.
 
 ## Functional groups
 
-The 21 tables fall into five clusters:
+The 22 tables fall into six clusters:
 
 1. **Facebook intelligence core** — what the product is about.
 2. **Ingestion & staging pipeline** — how data arrives and gets cleaned.
@@ -41,6 +41,9 @@ The 21 tables fall into five clusters:
    (scaffolded, 0 rows today).
 5. **Operational / workflow** — comment queue, triage inbox, briefings,
    experiments, engagement snapshots.
+6. **Agent coordination** — `agent_handbook`, the versioned
+   propagation channel for telling agents in other repos how to use
+   this database (see `docs/database/publish-protocol.md`).
 
 ---
 
@@ -272,6 +275,32 @@ Columns: `screenshot_id` PK, `source_url`, `screenshot_url`,
 
 ---
 
+## 4a. Agent coordination
+
+### `agent_handbook` — 1 row
+
+Append-only table that publishes instructions from this repo to Claude
+agents in **other** repos. They query `MAX(version) WHERE name=…` at
+session start and treat `content` as authoritative session memory.
+
+Columns: `id` PK (uuid, default `gen_random_uuid()`), `name` (text —
+which handbook; first one is `supabase-usage`), `version` (int —
+monotonically increasing per `name`), `content` (text — the markdown
+agents read), `changelog` (text — one line per version),
+`is_breaking` (bool, default false — when true, agents should stop and
+ask the operator before adopting the new version), `published_at`
+(timestamptz, default `now()`).
+
+Unique on `(name, version)`; secondary index
+`ix_agent_handbook_latest (name, version DESC)` for the
+`ORDER BY version DESC LIMIT 1` lookup pattern.
+
+The source-of-truth markdown for the current handbook lives at
+`docs/database/agent-handbook.md`. The publish runbook is at
+`docs/database/publish-protocol.md`.
+
+---
+
 ## 5. NLP / ML layer (scaffolded, 0 rows)
 
 The NLP tables use a **polymorphic content reference** —
@@ -386,7 +415,7 @@ opportunistically.
 
 ## Security advisory (Supabase)
 
-**RLS is disabled on all 21 public tables.** Remediation SQL (enabling
+**RLS is disabled on all 22 public tables.** Remediation SQL (enabling
 RLS without writing policies will block all anon/authenticated access —
 add policies first):
 
@@ -412,6 +441,11 @@ ALTER TABLE public.comment_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fb_post_engagement_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fb_content_experiments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.creator_briefings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_handbook ENABLE ROW LEVEL SECURITY;
 ```
+
+> Note for `agent_handbook`: when RLS is eventually designed, the
+> `SELECT` policy must be permissive for `anon` and `authenticated`,
+> otherwise external agents lose access to the handbook entirely.
 
 Reference: https://supabase.com/docs/guides/database/postgres/row-level-security

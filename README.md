@@ -24,3 +24,11 @@ with it:** [`docs/database/README.md`](docs/database/README.md).
 - [`docs/database/schema.md`](docs/database/schema.md) — full table
   reference: columns, FKs, indexes, enums, extensions, RLS advisory.
 - [`docs/database/erd.md`](docs/database/erd.md) — Mermaid ER diagram.
+- [`docs/database/agent-handbook.md`](docs/database/agent-handbook.md) —
+  source of truth for the handbook published from this repo to
+  `public.agent_handbook` in Supabase. Other agents read it from there.
+- [`docs/database/agent-handbook-bootstrap.md`](docs/database/agent-handbook-bootstrap.md) —
+  one-time snippet to paste into other repos' `CLAUDE.md` so their
+  agents start pulling the handbook on every session.
+- [`docs/database/publish-protocol.md`](docs/database/publish-protocol.md) —
+  runbook for publishing a new handbook version.

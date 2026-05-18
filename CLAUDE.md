@@ -223,7 +223,27 @@ moment. These tables are how the operator earns a living.
 
 ---
 
-## 8. What this file is NOT
+## 8. Publishing instructions to OTHER agents (the handbook table)
+
+Other Claude agents in other repos talk to the same Supabase project.
+We teach them how to use the database via an **append-only handbook
+table** in Supabase — `public.agent_handbook` — that those agents
+query at session start. We publish from this repo; they pull from
+the database.
+
+- **Source of truth** for the handbook: `docs/database/agent-handbook.md`.
+- **Bootstrap snippet** they paste into their own `CLAUDE.md` once:
+  `docs/database/agent-handbook-bootstrap.md`.
+- **How to publish a new version**: `docs/database/publish-protocol.md`.
+
+When the operator asks you to update what other agents know, follow
+the publish protocol — do not just edit the .md and walk away. The
+.md and the migration get committed together. Bump the integer
+`version`, write a one-line `changelog`, and set `is_breaking` only
+when an older agent following the previous handbook would now do the
+wrong thing.
+
+## 9. What this file is NOT
 
 - **It is not the schema reference.** The schema lives in
   [`docs/database/schema.md`](docs/database/schema.md). When the
