@@ -1,17 +1,45 @@
-# Bootstrap snippet for OTHER agents' CLAUDE.md
+<!--
+HANDBOOK SOURCE — keep in sync with the public.agent_handbook row
+where name = 'bootstrap-snippet'. The body below (frontmatter aside)
+matches the published content character-for-character. To bump:
+  1. Edit the body.
+  2. Bump version in the frontmatter, write a one-line changelog.
+  3. Apply a migration named publish_bootstrap_snippet_v<N> that
+     inserts a new row.
+  4. Commit this file and the migration together.
+See docs/database/publish-protocol.md.
+-->
 
-If you have **another** repo with its own Claude Code agent, and that
-agent needs to interact with the shared Supabase project
-`axon-node-1` (`jrogvnrddkshokplobsn`), paste the section below into
-that repo's `CLAUDE.md`. After this one-time paste, the other agent
-will pull the latest handbook from the database on every new session —
-no further sync work needed when we publish updates from this repo.
+---
+name: bootstrap-snippet
+version: 1
+is_breaking: false
+changelog: Initial publish of bootstrap snippet, retrievable from Supabase by any agent or operator.
+---
+
+# Bootstrap snippet — paste into a new repo's CLAUDE.md
+
+If an operator wants to wire another repo into this shared Supabase
+project, they paste the markdown block below into that repo's
+`CLAUDE.md` (creating the file if it does not exist). After the paste,
+no further sync work is needed in that repo — the agent there pulls
+updates from this database on every new session.
+
+You can retrieve this snippet at any time from any Supabase MCP
+session by querying:
+
+```sql
+SELECT content FROM public.agent_handbook
+WHERE name = 'bootstrap-snippet'
+ORDER BY version DESC LIMIT 1;
+```
 
 ---
 
-**Copy from here into the other repo's `CLAUDE.md`:**
+**Copy the markdown between the markers into the other repo's `CLAUDE.md`.**
 
-```markdown
+<!-- BEGIN PASTE -->
+
 ## Shared Supabase database — agent handbook
 
 Some work in this repo touches the shared Supabase project
@@ -33,45 +61,35 @@ Rules:
   `content` before acting.
 - If `is_breaking = true` and you have not seen this version,
   **stop and ask the operator** before proceeding — the handbook is
-  telling you that something an older agent would do is now wrong.
+  telling you something an older agent would have done is now wrong.
 - Re-check the handbook at the start of every new session. The
   version may have changed.
 
 The handbook covers: project coordinates, which MCP tool to use for
-what, the three non-obvious data patterns (staging columns,
-`source_run_id`, polymorphic content refs), the standing RLS-disabled
-issue, and the decision checkpoints that require pausing to ask the
-operator before acting.
-```
+what, the data patterns that are non-obvious if you have not seen this
+project (staging columns, `source_run_id`, polymorphic content refs),
+the standing RLS-disabled issue, and the decision checkpoints that
+require pausing to ask the operator before acting.
 
-**Stop copying.**
+<!-- END PASTE -->
 
 ---
 
-## Why this works
+## What the operator needs to confirm in the new repo
 
-- The handbook lives in `public.agent_handbook` in the shared database.
-- New versions are inserted (append-only) when we publish from
-  FB-Manager. See [`publish-protocol.md`](publish-protocol.md).
-- Any agent with a Supabase MCP connection (or anon key) to the project
-  can read the latest version — no extra credentials, no extra
-  endpoints.
-- Once the snippet above is in their `CLAUDE.md`, the other agent
-  follows it on every session automatically.
+1. The session has a Supabase MCP server attached (or anon-key access)
+   for project `jrogvnrddkshokplobsn`. Without it, the query above will
+   fail and the agent has no handbook.
+2. The `CLAUDE.md` in the new repo loads — open a fresh session and
+   ask the agent "what should I know about the shared database?" — the
+   agent should run the query and report the latest handbook version.
 
-## What you (the operator) need to do, once per repo
+## Versioning
 
-1. Open the other repo's `CLAUDE.md` (create if missing).
-2. Paste the snippet above.
-3. Commit. Done.
-
-## What to do when something doesn't propagate
-
-- Confirm the other agent's session has the Supabase MCP server
-  attached (or anon-key access) for project `jrogvnrddkshokplobsn`.
-- Ask the agent: "What handbook version are you on?" It should be able
-  to tell you. If it answers an old version, ask it to re-run the query.
-- If the agent reports a permission error: anon role currently has
-  read access (RLS disabled). If RLS gets enabled later, the read
-  policy for `agent_handbook` needs to be permissive for `anon` and
-  `authenticated`.
+This bootstrap snippet itself is versioned in `public.agent_handbook`
+under `name = 'bootstrap-snippet'`. If it ever changes (e.g. the SQL
+needs adjustment), a new row is published. The previously-pasted
+snippet keeps working unless the SQL itself becomes incompatible — in
+which case a new bootstrap version with `is_breaking = true` will be
+published, and the operator will need to re-paste in each downstream
+repo.

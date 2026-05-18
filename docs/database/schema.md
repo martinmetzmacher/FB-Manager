@@ -277,11 +277,15 @@ Columns: `screenshot_id` PK, `source_url`, `screenshot_url`,
 
 ## 4a. Agent coordination
 
-### `agent_handbook` — 1 row
+### `agent_handbook` — 3 rows
 
 Append-only table that publishes instructions from this repo to Claude
 agents in **other** repos. They query `MAX(version) WHERE name=…` at
 session start and treat `content` as authoritative session memory.
+Current names: `supabase-usage` (v2 latest) and `bootstrap-snippet`
+(v1, the paste-in markdown for wiring up new repos — retrievable from
+any Supabase session so the operator does not need to clone this
+repo).
 
 Columns: `id` PK (uuid, default `gen_random_uuid()`), `name` (text —
 which handbook; first one is `supabase-usage`), `version` (int —

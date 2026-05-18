@@ -106,11 +106,23 @@ audit trail.
   `length(content)` between file and DB row. Fix by publishing a new
   version that re-syncs.
 
+## Current handbooks and their source files
+
+| `name`              | Source of truth (markdown body matches DB row)   |
+|---------------------|--------------------------------------------------|
+| `supabase-usage`    | `docs/database/agent-handbook.md`                |
+| `bootstrap-snippet` | `docs/database/agent-handbook-bootstrap.md`      |
+
+When you publish a new version of either, edit the file and the DB row
+together in the same commit, named to match: migrations
+`publish_handbook_v<N>` for `supabase-usage`, and
+`publish_bootstrap_snippet_v<N>` for `bootstrap-snippet`.
+
 ## Adding a new handbook (different `name`)
 
-If you eventually need a separate handbook for a different topic
+If you eventually need another handbook for a different topic
 (e.g. `name = 'apify-pipeline'`), no schema change is needed. Create a
-new source file `docs/database/agent-handbook-<topic>.md`, write a
-migration that inserts the first row with that `name`, and update
-`agent-handbook-bootstrap.md` to instruct external agents to query
-both handbooks.
+new source file (`docs/database/handbook-<topic>.md`, or whatever
+naming scheme you prefer), add a frontmatter block, write a migration
+that inserts the first row with that `name`, and update the table
+above so the source-of-truth mapping stays accurate.

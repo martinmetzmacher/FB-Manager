@@ -15,12 +15,12 @@ See docs/database/publish-protocol.md for the full runbook.
 
 ---
 name: supabase-usage
-version: 1
+version: 2
 is_breaking: false
-changelog: Initial handbook publish
+changelog: Removed cross-repo reference; agents discover schema via list_tables instead.
 ---
 
-# Supabase Usage Handbook — v1
+# Supabase Usage Handbook — v2
 
 You are an agent in some other repo. You have been told to read this
 handbook before doing anything with the shared Supabase project
@@ -116,17 +116,18 @@ Do not auto-enable RLS — without policies it blocks all access.
 - Bulk UPDATE/DELETE on `fb_profiles`, `fb_posts`, `fb_comments`,
   `fb_reactions`, `apify_runs` → confirm row count first.
 
-## Reference
+## Finding the live schema
 
-For the full schema (every table, column, FK, index, enum, plus a
-Mermaid ERD) see the FB-Manager repo: `docs/database/schema.md` and
-`docs/database/erd.md`. If you do not have repo access, run
-`list_tables` with `verbose: true` against the project ref above.
+To see every table, column, FK, index, and enum, run `list_tables`
+with `verbose: true` via your Supabase MCP server. This always returns
+the current truth — there is no "documented" version that could drift.
+For a compact summary, `list_tables` with `verbose: false` returns
+table names, row counts, and the active security advisory.
 
 ---
 
-This handbook is published from the FB-Manager repo. To pick up newer
-versions:
+This handbook is maintained by the FB-Manager team and published into
+this database. To pick up newer versions:
 
 ```sql
 SELECT version, content, is_breaking, changelog
