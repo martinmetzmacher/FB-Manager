@@ -6,6 +6,14 @@ comments, reactions, and photos from Apify scrapers into Supabase
 comment queue), enrichment (places, web contacts, email verification),
 and a scaffolded NLP layer (embeddings, sentiment, topics).
 
+## For Claude (and humans browsing the repo)
+
+[`CLAUDE.md`](CLAUDE.md) briefs every new Claude Code session on the
+operator's skill level (not a database engineer) and the database
+rules of engagement (explain → ask → act, use migrations not raw
+DDL, RLS is disabled, decision checkpoints). Read it first if you're
+about to do anything to the database.
+
 ## Database
 
 The Supabase database is the source of truth. **Start here when working
