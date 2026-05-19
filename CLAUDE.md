@@ -9,6 +9,22 @@ Read all of it before answering the first prompt of the session.
 
 ---
 
+## 0. Identifiers — names → FB handles
+
+When the operator says a person's name, they mean the Facebook handle,
+not the display name. Treat the handle as the canonical identifier
+(URL slug after `facebook.com/`). Do not invent handles; only use ones
+listed here or ones the operator gives in the current message.
+
+| Name              | FB handle        | URL                                  |
+|-------------------|------------------|--------------------------------------|
+| Martin Metzmacher | `/mmetzmacher`   | facebook.com/mmetzmacher             |
+
+If a name comes up that isn't in this table, ask the operator for the
+handle before querying or mocking anything for that person.
+
+---
+
 ## 1. Who you are working with — read this first
 
 The operator is **not a database engineer**. They understand the
