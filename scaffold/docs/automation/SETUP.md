@@ -1,151 +1,181 @@
-# Automation Setup
+# Automation Setup — pg_cron → scheduled-scraper
 
-There are two automation paths. They can run independently or together.
-
-## Path A — Posts refresh: Apify schedule → Supabase Edge Function
-
-What it does: every day at 06:00 UTC, Apify scrapes the last N posts from a
-target Facebook profile, then POSTs a webhook to the Supabase Edge Function,
-which ingests the data and captures an engagement snapshot. No Claude
-involvement.
+## Architecture
 
 ```
-Apify Schedule  --cron-->  apify/facebook-posts-scraper run
-                                       |
-                          run finishes, webhook fires
-                                       v
-        https://<ref>.functions.supabase.co/ingest-fb-posts?secret=<...>
-                                       |
-                                       v
-        Supabase Edge Function fetches the dataset, upserts into
-        fb_posts, calls resolve_fb_posts_staging() RPC, returns 200.
+pg_cron (Supabase, free)
+    └── POST /functions/v1/scheduled-scraper  { tier, job }
+           ├── verify x-dispatch-secret
+           ├── budget gate (cron_budget)
+           ├── select targets (tracked profiles, posts, watchlist)
+           ├── invoke Apify actor; poll until terminal
+           ├── ingest dataset (staging-FK pattern)
+           ├── log cron_health row
+           ├── bump cron_budget
+           ├── on error → triage_inbox row
+           └── post-process: admit/graduate watchlist (B/C/E)
 ```
 
-### One-time setup
+Three tiers, independently toggle-able. Build order: Tier 1 → wait 3
+clean days → Tier 2 → wait 3 → Tier 3.
 
-1. **Apply the migration** that creates the helper RPC:
+| Job | Tier | Cadence              | Actor                                        | Est. cost |
+|-----|------|----------------------|----------------------------------------------|-----------|
+| A   | 1    | daily 06:00 UTC      | premiumscraper/facebook-pages-profile-scraper| ~$0.03/day |
+| B   | 2    | 4×/day               | apify/facebook-posts-scraper                 | ~$0.16/day |
+| C   | 2    | 2×/day               | apify/facebook-posts-scraper                 | ~$0.16/day |
+| D   | 2    | daily 23:00 UTC      | apify/facebook-comments-scraper              | ~$1-2/day |
+| E   | 3    | every 15 min         | apify/facebook-posts-scraper                 | ~$1-2/day |
 
-   ```bash
-   supabase db push   # if running migrations via CLI
-   # OR: apply via the MCP apply_migration tool
-   ```
+Hard cap: $5/day, auto-paused via `cron_budget.paused`.
 
-   File: `supabase/migrations/20260519_create_ingest_helpers.sql`.
+## One-time setup
 
-2. **Set Edge Function secrets** (Supabase CLI, or dashboard → Project Settings → Edge Functions):
+### 1. Apply the migrations
 
-   ```bash
-   supabase secrets set \
-     APIFY_TOKEN=<your apify api token> \
-     INGEST_WEBHOOK_SECRET=<a long random string you generate>
-   ```
+These have already been applied to the live DB on 2026-05-19 and are in
+this repo as records for fresh-environment reproducibility:
 
-   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by
-   Supabase — do not set them yourself.
+- `supabase/migrations/20260519_create_ingest_helpers.sql` — RPC
+  `resolve_fb_posts_staging(text)` used by the dispatcher's posts ingest.
+- `supabase/migrations/20260519_create_cron_health_and_budget.sql` —
+  `cron_health` + `cron_budget` tables.
+- `supabase/migrations/20260519_publish_handbook_v3.sql` — handbook
+  bumped to v3 with the new tables + permission policy documented.
 
-3. **Deploy the Edge Function:**
+If you ever need to recreate from scratch:
 
-   ```bash
-   supabase functions deploy ingest-fb-posts --project-ref jrogvnrddkshokplobsn
-   ```
+```bash
+supabase db push   # applies any migrations in supabase/migrations/
+```
 
-4. **Create the Apify Schedule** in the Apify Console (Schedules → Create):
-   - Cron: `0 6 * * *` (every day at 06:00 UTC)
-   - Actor: `apify/facebook-posts-scraper` (id `KoJrdxJCTtpon81KY`)
-   - Input:
-     ```json
-     {
-       "startUrls": [{ "url": "https://www.facebook.com/mmetzmacher" }],
-       "captionText": false,
-       "resultsLimit": 20
-     }
-     ```
-   - Save.
+### 2. Set Edge Function secrets
 
-5. **Add the webhook** to that schedule (Schedule → Settings → Integrations):
-   - Event: "Run succeeded"
-   - URL: `https://jrogvnrddkshokplobsn.functions.supabase.co/ingest-fb-posts?secret=<INGEST_WEBHOOK_SECRET>`
-   - Payload template: leave default (Apify ships the standard run payload).
+```bash
+supabase secrets set \
+  APIFY_TOKEN=<your apify api token> \
+  DISPATCH_SECRET=<a long random string you generate>
+```
 
-6. **Smoke test** by clicking "Run now" on the schedule. Then check:
-   ```sql
-   SELECT run_id, item_count, ingest_summary, ingested_at
-   FROM public.apify_runs
-   ORDER BY ingested_at DESC LIMIT 1;
-   ```
-   You should see the new run with `ingest_summary->>'source' = 'edge-function'`.
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected — do
+not set them manually.
 
-### Cost estimate
-- Apify: ~$0.004 per post × 20 posts = ~$0.08/day = ~$2.40/month
-- Supabase Edge Function: free tier covers thousands of invocations/month
+### 3. Deploy the Edge Function
 
----
+```bash
+supabase functions deploy scheduled-scraper --project-ref jrogvnrddkshokplobsn
+```
 
-## Path B — Smart comments refresh: Claude scheduled trigger
+Each job is testable independently via curl before pg_cron drives it:
 
-What it does: every day at 07:00 UTC (after Path A has refreshed posts),
-a Claude Code session wakes up, queries engagement snapshots to find posts
-where comment counts jumped meaningfully since the previous snapshot, and
-runs a targeted Apify comments-scrape against those posts. Logs into
-apify_runs as usual.
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'x-dispatch-secret: <DISPATCH_SECRET>' \
+  -d '{"tier":1,"job":"A"}' \
+  https://jrogvnrddkshokplobsn.supabase.co/functions/v1/scheduled-scraper
+```
 
-Why this needs Claude rather than another Edge Function: the decision
-"which posts deserve a comments scrape?" depends on velocity, total
-volume, and recency in ways that change over time. A prompt is easier to
-tune than a fixed SQL heuristic.
-
-### One-time setup
-
-1. Open the `Supabase` repo in Claude Code on web: https://claude.ai/code
-2. Navigate to **Settings → Triggers** for this repo.
-3. Create a new **Scheduled trigger** with:
-   - Schedule: `0 7 * * *` (daily 07:00 UTC)
-   - Prompt: paste the contents of
-     [`claude-triggers/daily-smart-comments-refresh.md`](../../claude-triggers/daily-smart-comments-refresh.md)
-4. Save.
-
-### Cost estimate
-- Claude tokens per run: ~$0.50–$1.00 (one short Claude session)
-- Apify costs depend on how many posts the prompt decides to scrape
-  comments for; typical day: ~$0.50–$2.00
-
-### Where the run output goes
-The session ends naturally after it finishes. It can also commit a
-summary file to the Supabase repo if you ask it to in the prompt, but the
-canonical record is in `public.apify_runs`.
-
----
-
-## Verifying it works
-
-After both are running for a day:
+Verify by looking at `cron_health`:
 
 ```sql
--- Yesterday's automated runs
-SELECT actor_name, status, item_count, cost_usd, started_at,
-       ingest_summary
-FROM public.apify_runs
-WHERE started_at > now() - interval '36 hours'
-  AND ingest_summary->>'source' = 'edge-function'
-ORDER BY started_at DESC;
-
--- Engagement deltas captured by the snapshots
-SELECT post_id, captured_at,
-       likes_count - lag(likes_count) OVER w  AS d_likes,
-       comments_count - lag(comments_count) OVER w AS d_comments
-FROM public.fb_post_engagement_snapshots
-WINDOW w AS (PARTITION BY post_id ORDER BY captured_at)
-ORDER BY captured_at DESC LIMIT 20;
+SELECT job, status, cost_usd, items_in, rows_written, error_kind
+FROM public.cron_health
+ORDER BY fired_at DESC LIMIT 5;
 ```
 
-## What to do when it breaks
+### 4. Schedule the pg_cron jobs
 
-- **Edge Function 500s** → `supabase functions logs ingest-fb-posts`.
-- **Apify run failed** → Apify Console → Runs → click the failed run.
-- **Schedule didn't fire** → Apify Console → Schedules → check "Last run".
-- **Webhook returned 401** → secret mismatch. Re-check
-  `INGEST_WEBHOOK_SECRET` and the `?secret=` query param on the
-  webhook URL.
-- **Posts not appearing in DB** → run the verification query above. If
-  `apify_runs` has the run but `fb_posts` is empty, the upsert returned
-  no rows — check the function logs for an error.
+Edit `supabase/pg_cron_schedules.sql` — replace the `\set
+dispatch_secret '<paste...>'` placeholder with the same string you set
+in step 2. Apply once (idempotent):
+
+```bash
+psql <YOUR_CONNECTION_STRING> -f supabase/pg_cron_schedules.sql
+# or via Supabase SQL editor
+```
+
+Confirm:
+
+```sql
+SELECT jobname, schedule, active FROM cron.job ORDER BY jobname;
+```
+
+You should see `tier1_A`, `tier2_B`, `tier2_C`, `tier2_D`, `tier3_E`.
+
+### 5. Phased activation
+
+The pg_cron schedule file enables ALL tiers at once. To do phased
+activation, deactivate the higher tiers first and reactivate them as
+each one proves stable:
+
+```sql
+-- Activate only Tier 1 for now
+UPDATE cron.job SET active = false WHERE jobname IN ('tier2_B','tier2_C','tier2_D','tier3_E');
+UPDATE cron.job SET active = true  WHERE jobname = 'tier1_A';
+```
+
+After 3 days of clean Tier 1 runs (check `cron_health`), enable Tier 2:
+
+```sql
+UPDATE cron.job SET active = true
+WHERE jobname IN ('tier2_B','tier2_C','tier2_D');
+```
+
+Same pattern for Tier 3.
+
+## Verifying health
+
+```sql
+-- Last 24h runs grouped by job + status
+SELECT job, status, count(*),
+       round(sum(cost_usd)::numeric, 4) AS spent
+FROM public.cron_health
+WHERE fired_at > now() - interval '24 hours'
+GROUP BY job, status
+ORDER BY job;
+
+-- Today's spend vs cap
+SELECT day, spent_usd, cap_usd, paused, pause_reason
+FROM public.cron_budget
+WHERE day = current_date;
+
+-- Watchlist
+SELECT post_id, admit_reason, admitted_at, poll_interval_sec
+FROM public.fb_post_watchlist
+WHERE graduated_at IS NULL
+ORDER BY admitted_at DESC;
+```
+
+## Daily digest (TODO)
+
+A 7th cron at 07:00 UTC should query the last 24h of `cron_health`,
+summarise, and write a `triage_inbox` row with `kind='cron_daily_digest'`.
+Not yet implemented — add as a v1 follow-up.
+
+## Auto-pause behavior
+
+| Trigger                                         | What happens                                      | Recovery |
+|-------------------------------------------------|---------------------------------------------------|----------|
+| `spent_usd >= cap_usd`                          | All jobs return `skipped_budget` until UTC midnight | Auto: new day = fresh row |
+| ≥3 errors in 24h on the same job (TODO)         | Set `paused=true, pause_reason='consecutive_failures'` | Manual: `UPDATE cron_budget SET paused=false WHERE day=...` |
+| Operator-set pause                              | Same as above with `pause_reason='operator'`      | Manual: same |
+
+## What's NOT in this scaffold (yet)
+
+- The per-job ingest implementations (`ingestProfileSnapshots`,
+  `ingestPosts`, `ingestComments`). Currently throw `TODO: implement`
+  with comments on the staging-FK pattern. Build these one job at a
+  time, test by curling the endpoint, then activate the cron schedule.
+- Watchlist admit/graduate logic (`admitNewPostsToWatchlist`,
+  `graduateColdPosts`). Stubbed.
+- Daily digest + drift detection + cost anomaly detection — design in
+  the project status doc; implement once Tier 1 has 3 clean days.
+
+## Reference
+
+- Permission policy: see `public.agent_handbook` row where
+  `name = 'supabase-usage' AND version = 3`. Ad-hoc paid Apify calls
+  need the ASCII permission form; scheduled cron is exempt.
+- Schema reference: run `list_tables` with `verbose: true`. There is
+  no maintained .md schema doc.
